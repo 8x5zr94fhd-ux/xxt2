@@ -45,8 +45,11 @@ let mouseY = player.y;
 
 let score = 0; 
 let lastEnemyTime = 0; 
-const BASE_ENEMY_INTERVAL = 1200; 
-const BASE_ENEMY_SPEED = 1; 
+// **调整 1：加快基础敌人生成间隔**
+const BASE_ENEMY_INTERVAL = 800; // 0.8秒生成一个
+// **调整 2：加快基础敌人移动速度**
+const BASE_ENEMY_SPEED = 2; // 初始速度加快
+// ...
 
 let gameOver = false; 
 
@@ -121,7 +124,7 @@ function drawSinglePlane(x, y, rotation, bodyColor, wingColor) {
     ctx.restore(); 
 }
 
-// 绘制玩家及其僚机
+// 绘制玩家及其僚机 (保持原样)
 function drawPlayer() {
     drawSinglePlane(player.x, player.y, 0, player.color, '#ADD8E6');
 
@@ -131,20 +134,17 @@ function drawPlayer() {
     }
 }
 
-// 绘制 Boss
+// 绘制 Boss 和 Boss 子弹 (保持原样)
 function drawBoss() {
     if (!boss) return;
-
+    // ... (Boss 绘制代码) ...
     ctx.save();
     ctx.translate(boss.x, boss.y);
-    
-    // Boss 本体 (一个大红色方块，体现障碍物合体)
     ctx.fillStyle = boss.color;
     ctx.fillRect(-boss.width / 2, -boss.height / 2, boss.width, boss.height);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 5;
     ctx.strokeRect(-boss.width / 2, -boss.height / 2, boss.width, boss.height);
-
     ctx.restore();
     
     // 绘制 Boss 血条
@@ -152,25 +152,20 @@ function drawBoss() {
     const barY = 80;
     const barWidth = 300;
     const barHeight = 25;
-
     ctx.fillStyle = '#ccc';
     ctx.fillRect(barX, barY, barWidth, barHeight);
-
     const currentHealthWidth = (boss.health / boss.maxHealth) * barWidth;
     ctx.fillStyle = 'red';
     ctx.fillRect(barX, barY, currentHealthWidth, barHeight);
-
     ctx.strokeStyle = 'black';
     ctx.lineWidth = 2;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
-
     ctx.font = '20px Arial';
     ctx.fillStyle = 'black';
     ctx.textAlign = 'center';
     ctx.fillText(`BOSS HP: ${boss.health}/${boss.maxHealth}`, GAME_WIDTH / 2, barY + 18);
 }
 
-// 绘制 Boss 子弹
 function drawBossBullet(bullet) {
     ctx.beginPath();
     ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
@@ -179,69 +174,6 @@ function drawBossBullet(bullet) {
     ctx.shadowColor = '#FF0000';
     ctx.fill();
     ctx.shadowBlur = 0;
-}
-
-
-// 绘制文字 (得分、游戏结束、血量条文本、剩余时间)
-function drawText() {
-    ctx.font = '24px Arial';
-    ctx.fillStyle = 'black';
-    ctx.textAlign = 'left';
-
-    // 显示得分和生命
-    ctx.fillText('得分: ' + score, 20, 40);
-    ctx.fillText('生命: ' + player.health + '/' + player.maxHealth, GAME_WIDTH - 180, 40);
-
-    // 计算并显示剩余时间
-    const timeRemaining = Math.max(0, Math.ceil((GAME_DURATION - gameTime) / 1000));
-    ctx.font = 'bold 28px Arial';
-    ctx.fillStyle = (timeRemaining <= 10 && timeRemaining > 0) ? 'red' : 'black';
-    ctx.textAlign = 'center';
-    ctx.fillText(`时间: ${timeRemaining}`, GAME_WIDTH / 2, 40);
-
-    // 显示道具状态
-    ctx.font = '24px Arial';
-    if (powerUp.type !== 'Normal' && powerUp.type !== 'Wingman') {
-        ctx.fillStyle = powerUp.type === 'Speed' ? '#32CD32' : '#FFC0CB';
-        const remaining = Math.max(0, Math.ceil((powerUp.endTime - Date.now()) / 1000));
-        ctx.textAlign = 'left';
-        ctx.fillText(`${powerUp.type} (${remaining}s)`, 20, 70);
-    } else if (player.hasWingman) {
-        ctx.fillStyle = '#DAA520';
-        ctx.textAlign = 'left';
-        ctx.fillText(`Wingman Active`, 20, 70);
-    }
-    
-    // 游戏结束显示
-    if (gameOver) {
-        ctx.font = '48px Arial';
-        ctx.fillStyle = 'red';
-        ctx.textAlign = 'center'; 
-        ctx.fillText('游戏结束！', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30);
-        
-        ctx.font = '28px Arial';
-        ctx.fillStyle = 'black';
-        ctx.fillText('点击屏幕重新开始', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20);
-    }
-    ctx.textAlign = 'left'; 
-}
-
-function drawHealthBar() {
-    const barX = GAME_WIDTH - 180;
-    const barY = 50;
-    const barWidth = 150;
-    const barHeight = 20;
-
-    ctx.fillStyle = '#ccc';
-    ctx.fillRect(barX, barY, barWidth, barHeight);
-
-    const currentHealthWidth = (player.health / player.maxHealth) * barWidth;
-    ctx.fillStyle = player.health < 30 ? '#ff4500' : 'red';
-    ctx.fillRect(barX, barY, currentHealthWidth, barHeight);
-
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
 }
 
 // 绘制道具 (保持原样)
@@ -274,7 +206,7 @@ function drawBullet(bullet) {
     ctx.shadowBlur = 0; 
 }
 
-// 绘制敌人 (改为黑色圆球障碍物)
+// 绘制敌人 (黑色圆球障碍物 - V2.1的改进，保持不变)
 function drawEnemy(enemy) {
     const radius = enemy.width / 2;
     ctx.save();
@@ -336,7 +268,7 @@ function checkCollision(objA, objB) {
     }
 }
 
-// 敌人/道具生成逻辑 (道具生成几率降为 1%)
+// 敌人/道具生成逻辑 (道具生成几率 1%，基础速度和间隔加快)
 function spawnObject(currentTime) {
     if (gameState !== 'Playing' || gameOver) {
         return; 
@@ -351,11 +283,11 @@ function spawnObject(currentTime) {
     if (currentTime - lastEnemyTime > currentEnemyInterval) {
         const randomX = Math.random() * (GAME_WIDTH - 80) + 40; 
         
-        // **修改点 1: 道具生成几率降为 1%**
+        // **修改点 3: 道具生成几率严格保持 1%**
         const isItem = Math.random() < 0.01; 
 
         if (isItem) {
-            // 0:Triple, 1:Spread, 2:ClearScreen, 3:Wingman, 4:Homing
+            // 道具生成逻辑
             const itemType = Math.floor(Math.random() * 5); 
             let color, text, type;
             if (itemType === 0) { color = '#FFC0CB'; text = 'T'; type = 'Triple'; }
@@ -382,7 +314,7 @@ function spawnObject(currentTime) {
                 y: -50, 
                 width: 40, 
                 height: 40,
-                color: '#000000', // 颜色在 drawEnemy 中定义，这里仅作标记
+                color: '#000000', 
                 speed: currentEnemySpeed, 
                 rotation: Math.random() * 0.1 - 0.05
             });
@@ -491,7 +423,7 @@ function shoot() {
 
 const BOSS_MOVE_SPEED = 2;
 let lastBossShotTime = 0;
-const BOSS_SHOT_INTERVAL = 800; // Boss 射击间隔更短
+const BOSS_SHOT_INTERVAL = 800; 
 
 function Boss() {
     this.x = GAME_WIDTH / 2;
@@ -565,6 +497,7 @@ function startBossBattle() {
 
 function update(currentTime) {
     if (gameOver) {
+        // ... (Game Over Screen) ...
         drawStars();
         if (boss) drawBoss();
         drawText(); 
@@ -609,11 +542,13 @@ function update(currentTime) {
     // 5. 更新子弹和对象位置 (保持稳定)
     bullets = bullets.filter(bullet => {
         if (bullet.isHoming && bullet.target) {
+           // ... (Homing logic) ...
             const target = bullet.target;
             const angle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
             bullet.x += Math.cos(angle) * bullet.speed;
             bullet.y += Math.sin(angle) * bullet.speed;
         } else if (bullet.angle !== undefined) {
+           // ... (Spread logic) ...
             bullet.x += Math.sin(bullet.angle) * bullet.speed;
             bullet.y -= Math.cos(bullet.angle) * bullet.speed;
         } else {
@@ -675,7 +610,7 @@ function update(currentTime) {
     });
 
 
-    // 6. 碰撞检测：子弹击中敌人/Boss
+    // 6. 碰撞检测：子弹击中敌人/Boss (保持稳定)
     for (let i = 0; i < bullets.length; i++) {
         let bulletHit = false;
         const bulletCollisionObj = { x: bullets[i].x, y: bullets[i].y, radius: bullets[i].radius };
@@ -714,6 +649,7 @@ function update(currentTime) {
     bossBullets.forEach(drawBossBullet);
     if (boss) drawBoss();
     
+    // ... (Draw Text and Health Bar) ...
     drawText(); 
     drawHealthBar(); 
 
@@ -722,7 +658,6 @@ function update(currentTime) {
 
 // --- 8. 输入控制 (支持移动端触摸) ---
 
-// 统一处理鼠标和触摸输入
 function handleInput(e) {
     if (e.touches && e.touches.length > 0) {
         const rect = canvas.getBoundingClientRect();
