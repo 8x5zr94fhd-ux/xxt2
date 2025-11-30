@@ -71,6 +71,32 @@ const ENEMY_HEALTH = 3; // 敌机血量 (2-3次击中)
 let gameOver = false; 
 let gameStartTimestamp = 0; 
 
+// 背景星星 (略)
+let stars = [];
+for (let i = 0; i < 50; i++) {
+    stars.push({
+        x: Math.random() * GAME_WIDTH,
+        y: Math.random() * GAME_HEIGHT,
+        radius: Math.random() * 1.5,
+        speed: Math.random() * 0.5 + 0.1, 
+        color: `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.5})`
+    });
+}
+function drawStars() {
+    stars.forEach(star => {
+        star.y += star.speed;
+        if (star.y > GAME_HEIGHT) {
+            star.y = 0;
+            star.x = Math.random() * GAME_WIDTH;
+        }
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+        ctx.fillStyle = star.color;
+        ctx.fill();
+    });
+}
+
+
 // 存储和加载函数
 function saveUpgrades() {
     localStorage.setItem('bulletRateLevel', upgrades.bulletRateLevel);
@@ -91,7 +117,7 @@ function getBulletRadius() {
 }
 
 
-// --- 2. 游戏对象绘制函数 (绘制敌机血条) ---
+// --- 2. 游戏对象绘制函数 ---
 
 function drawSinglePlane(x, y, rotation, bodyColor, wingColor) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(rotation); 
@@ -114,7 +140,24 @@ function drawPlayer() {
     }
 }
 
-// 绘制敌机 (现在是带血量的敌机)
+function drawBoss() {
+    if (!boss) return;
+    ctx.save(); ctx.translate(boss.x, boss.y); ctx.fillStyle = boss.color; ctx.fillRect(-boss.width / 2, -boss.height / 2, boss.width, boss.height);
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 5; ctx.strokeRect(-boss.width / 2, -boss.height / 2, boss.width, boss.height); ctx.restore();
+    const barX = GAME_WIDTH / 2 - 150; const barY = 80; const barWidth = 300; const barHeight = 25;
+    ctx.fillStyle = '#ccc'; ctx.fillRect(barX, barY, barWidth, barHeight);
+    const currentHealthWidth = (boss.health / boss.maxHealth) * barWidth;
+    ctx.fillStyle = 'red'; ctx.fillRect(barX, barY, currentHealthWidth, barHeight);
+    ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.strokeRect(barX, barY, barWidth, barHeight);
+    ctx.font = '20px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center'; ctx.fillText(`BOSS HP: ${boss.health}/${boss.maxHealth} (Phase ${currentBossPhase})`, GAME_WIDTH / 2, barY + 18);
+}
+
+function drawBossBullet(bullet) {
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    ctx.fillStyle = '#FF0000'; ctx.shadowBlur = 10; ctx.shadowColor = '#FF0000'; ctx.fill(); ctx.shadowBlur = 0;
+}
+
 function drawEnemy(enemy) {
     const radius = enemy.width / 2;
     ctx.save(); 
@@ -139,7 +182,6 @@ function drawEnemy(enemy) {
     ctx.restore();
 }
 
-// 绘制敌机子弹
 function drawEnemyBullet(bullet) {
     ctx.beginPath();
     ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
@@ -150,6 +192,70 @@ function drawEnemyBullet(bullet) {
     ctx.shadowBlur = 0;
 }
 
+function drawBullet(bullet) {
+    const radius = getBulletRadius(); 
+    ctx.beginPath(); ctx.arc(bullet.x, bullet.y, radius, 0, Math.PI * 2); 
+    ctx.fillStyle = '#FFD700'; ctx.shadowBlur = 15; ctx.shadowColor = '#FFD700'; ctx.fill(); ctx.shadowBlur = 0; 
+}
+
+function drawUpgradeIndicators() {
+    const barX = GAME_WIDTH - 180; const barY = 75; const dotRadius = 4; const dotSpacing = 8;
+    ctx.font = '16px Arial'; ctx.fillStyle = '#32CD32'; ctx.textAlign = 'right';
+    ctx.fillText(`速率 Lv.${upgrades.bulletRateLevel}`, barX - 10, barY + 5);
+
+    for (let i = 0; i < upgrades.bulletRateLevel; i++) {
+        ctx.beginPath(); ctx.arc(barX + i * dotSpacing, barY + 5, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#32CD32'; ctx.fill();
+    }
+    
+    ctx.fillText(`大小 Lv.${upgrades.bulletSizeLevel}`, barX - 10, barY + 25);
+    for (let i = 0; i < upgrades.bulletSizeLevel; i++) {
+        ctx.beginPath(); ctx.arc(barX + i * dotSpacing, barY + 25, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFC0CB'; ctx.fill();
+    }
+    ctx.textAlign = 'left';
+}
+
+function drawText() {
+    ctx.font = '24px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'left';
+    ctx.fillText('分数: ' + score, 20, 40);
+    ctx.fillText('生命: ' + player.health + '/' + player.maxHealth, GAME_WIDTH - 180, 40);
+
+    if (gameState === 'Playing' || gameState === 'BossFight') {
+        const timeRemaining = Math.max(0, Math.ceil((GAME_DURATION - gameTime) / 1000));
+        ctx.font = 'bold 28px Arial';
+        ctx.fillStyle = (timeRemaining <= 10 && timeRemaining > 0) ? 'red' : 'black';
+        ctx.textAlign = 'center';
+        ctx.fillText(`时间: ${timeRemaining}`, GAME_WIDTH / 2, 40);
+    }
+
+    ctx.font = '24px Arial';
+    if (powerUp.type !== 'Normal' && powerUp.type !== 'Wingman') {
+        ctx.fillStyle = powerUp.type === 'Speed' ? '#32CD32' : '#FFC0CB';
+        const remaining = Math.max(0, Math.ceil((powerUp.endTime - Date.now()) / 1000));
+        ctx.textAlign = 'left'; ctx.fillText(`${powerUp.type} (${remaining}s)`, 20, 70);
+    } else if (player.hasWingman) {
+        ctx.fillStyle = '#DAA520'; ctx.textAlign = 'left'; ctx.fillText(`Wingman Active`, 20, 70);
+    }
+    
+    if (gameOver) {
+        ctx.font = '48px Arial'; ctx.fillStyle = 'red'; ctx.textAlign = 'center'; 
+        ctx.fillText('游戏结束！', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30);
+        ctx.font = '28px Arial'; ctx.fillStyle = 'black';
+        ctx.fillText('点击屏幕返回菜单', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20);
+    }
+    ctx.textAlign = 'left'; 
+}
+
+function drawHealthBar() {
+    const barX = GAME_WIDTH - 180; const barY = 50; const barWidth = 150; const barHeight = 20;
+    ctx.fillStyle = '#ccc'; ctx.fillRect(barX, barY, barWidth, barHeight);
+    const currentHealthWidth = (player.health / player.maxHealth) * barWidth;
+    ctx.fillStyle = player.health < 30 ? '#ff4500' : 'red';
+    ctx.fillRect(barX, barY, currentHealthWidth, barHeight);
+    ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.strokeRect(barX, barY, barWidth, barHeight);
+    drawUpgradeIndicators();
+}
 
 // --- 3. 道具释放按钮和菜单重构 ---
 
@@ -195,21 +301,31 @@ function drawItemButtons() {
     });
 }
 
-function activateItem(type) {
-    if (inventory[type] <= 0) return;
+function applyPowerUp(type) {
+    const duration = 8000;
+    if (type === 'ClearScreen') { enemies = []; enemyBullets = []; bossBullets = []; return; }
     
-    // 特殊道具：立即生效
-    if (type === 'ClearScreen') {
-        enemies = [];
-        enemyBullets = [];
-        bossBullets = [];
-        inventory[type]--;
-        saveUpgrades();
-        return;
+    // Wingman是永久的，激活后不应被计时器清除
+    if (type === 'Wingman') { player.hasWingman = true; return; }
+    
+    // 清除旧的计时效果
+    player.speed = player.baseSpeed; 
+    powerUp.type = type; powerUp.duration = duration; powerUp.endTime = Date.now() + duration;
+    if (type === 'Speed') { player.speed *= 1.5; }
+}
+
+function checkPowerUpStatus() {
+    if (powerUp.type !== 'Normal' && Date.now() > powerUp.endTime) {
+        powerUp.type = 'Normal'; powerUp.duration = 0; player.speed = player.baseSpeed; 
+    }
+}
+
+function activateItem(type) {
+    if (type === 'Wingman') {
+         if (player.hasWingman) return; // Wingman已激活则不能再使用
     }
     
-    // 持久型道具：检查是否已激活
-    if (type === 'Wingman' && player.hasWingman) return;
+    if (inventory[type] <= 0) return;
     
     // 激活效果
     applyPowerUp(type);
@@ -219,7 +335,60 @@ function activateItem(type) {
     saveUpgrades();
 }
 
-// 道具商店绘制
+function drawButton(x, y, w, h, text, color) {
+    ctx.fillStyle = color; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = 'white'; ctx.font = '30px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2);
+}
+
+function drawMenu() {
+    ctx.font = '48px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center';
+    ctx.fillText('星际躲避战', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 150);
+    drawButton(GAME_WIDTH / 2 - 150, GAME_HEIGHT / 2 - 50, 300, 70, '开始游戏', '#32CD32');
+    drawButton(GAME_WIDTH / 2 - 150, GAME_HEIGHT / 2 + 50, 300, 70, '升级装备', '#1E90FF');
+    ctx.font = '24px Arial'; ctx.fillStyle = 'black';
+    ctx.fillText(`当前分数 (货币): ${score}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 160);
+}
+
+function drawUpgradeScreen() {
+    ctx.font = '40px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center'; ctx.fillText('装备升级中心', GAME_WIDTH / 2, 80);
+    ctx.font = '24px Arial'; ctx.fillText(`当前分数 (货币): ${score} (1000分 = 1点)`, GAME_WIDTH / 2, 130);
+
+    const btnW = 300; const btnH = 60; const btnX = GAME_WIDTH / 2 - 150; let y = 200;
+    
+    // --- 1. 射速升级 ---
+    ctx.textAlign = 'left'; ctx.fillStyle = 'black';
+    ctx.fillText(`射速 (Lv.${upgrades.bulletRateLevel}/${MAX_UPGRADE_LEVEL})`, btnX, y);
+    ctx.fillText(`效果: 提高 ${upgrades.bulletRateLevel}% 射速`, btnX, y + 25);
+    if (upgrades.bulletRateLevel < MAX_UPGRADE_LEVEL) {
+        drawButton(btnX, y + 30, btnW, btnH, 
+            score >= UPGRADE_COST ? `升级 (1000 分)` : '分数不足', 
+            score >= UPGRADE_COST ? '#32CD32' : '#808080');
+    } else { drawButton(btnX, y + 30, btnW, btnH, '已满级', '#FF4500'); }
+    
+    y += 150;
+    
+    // --- 2. 子弹大小升级 ---
+    ctx.textAlign = 'left'; ctx.fillStyle = 'black';
+    ctx.fillText(`子弹大小 (Lv.${upgrades.bulletSizeLevel}/${MAX_UPGRADE_LEVEL})`, btnX, y);
+    ctx.fillText(`效果: 增大 ${upgrades.bulletSizeLevel}% 大小`, btnX, y + 25);
+    if (upgrades.bulletSizeLevel < MAX_UPGRADE_LEVEL) {
+        drawButton(btnX, y + 30, btnW, btnH, 
+            score >= UPGRADE_COST ? `升级 (1000 分)` : '分数不足', 
+            score >= UPGRADE_COST ? '#32CD32' : '#808080');
+    } else { drawButton(btnX, y + 30, btnW, btnH, '已满级', '#FF4500'); }
+
+    y += 150;
+    
+    // --- 3. 道具商店入口 ---
+    drawButton(btnX, y + 30, btnW, btnH, '进入道具商店', '#FFA500');
+
+
+    // 返回菜单按钮
+    drawButton(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50, '返回菜单', '#1E90FF');
+}
+
 function drawShopScreen() {
     ctx.font = '40px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center'; ctx.fillText('道具商店 (1点 = 1000分)', GAME_WIDTH / 2, 80);
     ctx.font = '24px Arial'; ctx.fillText(`当前分数 (货币): ${score}`, GAME_WIDTH / 2, 130);
@@ -232,7 +401,8 @@ function drawShopScreen() {
         { type: 'Spread', text: '扇形射击 (8s)', cost: ITEM_COST, desc: '大范围扇形攻击' },
         { type: 'Homing', text: '追踪导弹 (8s)', cost: ITEM_COST, desc: '子弹自动追踪最近目标' },
         { type: 'Speed', text: '加速 (8s)', cost: ITEM_COST, desc: '提高移动速度' },
-        { type: 'Wingman', text: '僚机', cost: ITEM_COST * 2, desc: '永久僚机 (直到死亡)' } // Wingman更贵
+        { type: 'Wingman', text: '僚机', cost: ITEM_COST * 2, desc: '永久僚机 (直到死亡)' }, // Wingman更贵
+        { type: 'ClearScreen', text: '清屏', cost: ITEM_COST * 3, desc: '立即清除所有敌机和子弹' } // 新增清屏
     ];
     
     shopItems.forEach(item => {
@@ -264,9 +434,11 @@ function handleShopClick(clickX, clickY) {
         { type: 'Spread', cost: ITEM_COST },
         { type: 'Homing', cost: ITEM_COST },
         { type: 'Speed', cost: ITEM_COST },
-        { type: 'Wingman', cost: ITEM_COST * 2 }
+        { type: 'Wingman', cost: ITEM_COST * 2 },
+        { type: 'ClearScreen', cost: ITEM_COST * 3 }
     ];
 
+    // 检查购买按钮点击
     shopItems.forEach(item => {
         if (checkClick(btnX, y + 30, btnW, btnH)) {
             if (score >= item.cost) {
@@ -285,10 +457,32 @@ function handleShopClick(clickX, clickY) {
 }
 
 
-// --- 4. 敌机生成和行为 (核心修改) ---
+// --- 4. 敌机生成和行为 ---
 
 let lastEnemyShotTime = 0;
 const ENEMY_SHOT_INTERVAL = 1500; // 敌机每 1.5 秒射击一次
+
+function checkCollision(objA, objB) {
+    // ... (Collision Logic - unchanged from V3.1) ...
+    const isCircle = objA.radius !== undefined;
+    if (isCircle) {
+        let testX = objA.x; let testY = objA.y;
+        if (objA.x < objB.x - objB.width / 2) testX = objB.x - objB.width / 2;
+        else if (objA.x > objB.x + objB.width / 2) testX = objB.x + objB.width / 2;
+        if (objA.y < objB.y - objB.height / 2) testY = objB.y - objB.height / 2;
+        else if (objA.y > objB.y + objB.height / 2) testY = objB.y + objB.height / 2;
+        let distX = objA.x - testX; let distY = objA.y - testY;
+        let distance = Math.sqrt((distX * distX) + (distY * distY));
+        return distance <= objA.radius; 
+    } else {
+        const A_halfW = objA.width / 2 * 0.8; const A_halfH = objA.height / 2 * 0.8;
+        const B_halfW = objB.width / 2; const B_halfH = objB.height / 2;
+        return objA.x + A_halfW > objB.x - B_halfW &&
+               objA.x - A_halfW < objB.x + B_halfW &&
+               objA.y + A_halfH > objB.y - B_halfH &&
+               objA.y - A_halfH < objB.y + B_halfH;
+    }
+}
 
 function spawnObject(currentTime) {
     if (gameOver) return;
@@ -325,6 +519,46 @@ function spawnObject(currentTime) {
     }
 }
 
+function shoot() {
+    if (gameOver) return; if (player.health <= 0) return; 
+
+    const bulletRadius = getBulletRadius();
+    const spawnY = player.y - player.height / 2;
+    const spawnX = player.x;
+    const bulletSpeed = 10;
+    
+    let homingTarget = null;
+    if (powerUp.type === 'Homing') {
+        if (boss) { homingTarget = boss; } 
+        else if (enemies.length > 0) {
+            homingTarget = enemies.reduce((closest, current) => {
+                const dist1 = Math.hypot(spawnX - closest.x, spawnY - closest.y);
+                const dist2 = Math.hypot(spawnX - current.x, spawnY - current.y);
+                return dist2 < dist1 ? current : closest;
+            }, enemies[0]);
+        }
+    }
+
+    const fireBullet = (x, y, isWingman = false) => {
+        bullets.push({ x: x, y: y, radius: bulletRadius, speed: bulletSpeed, isHoming: powerUp.type === 'Homing', target: homingTarget, isWingman: isWingman });
+    };
+
+    if (powerUp.type === 'Spread') {
+        for (let angle = -30; angle <= 30; angle += 15) { 
+            const angleRad = angle * Math.PI / 180;
+            bullets.push({ x: spawnX, y: spawnY, radius: bulletRadius, angle: angleRad, speed: bulletSpeed });
+        }
+    } else if (powerUp.type === 'Triple') {
+        fireBullet(spawnX, spawnY); fireBullet(spawnX - 15, spawnY + 10); fireBullet(spawnX + 15, spawnY + 10); 
+    } else {
+        fireBullet(spawnX, spawnY);
+    }
+    
+    if (player.hasWingman && powerUp.type !== 'Spread' && powerUp.type !== 'Triple') {
+         fireBullet(player.x - 60, player.y + 10, true); 
+         fireBullet(player.x + 60, player.y + 10, true); 
+    }
+}
 
 // --- 5. Boss 逻辑 (三阶段增强) ---
 
@@ -412,10 +646,9 @@ function startBossBattle() {
 }
 
 
-// --- 6. 游戏核心循环 (更新碰撞逻辑) ---
+// --- 6. 游戏核心循环 ---
 
 function update(currentTime) {
-    // ... (Drawing stars, menu, upgrade screens) ...
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
 
@@ -443,9 +676,10 @@ function update(currentTime) {
         // 1. 状态机逻辑
         if (gameState === 'Playing') {
             spawnObject(currentTime);
-            // V4.0: 移除 30秒 Boss 逻辑，Boss 仅在游戏时间结束时出现 (可选: 如果需要Boss战，请在 Playing 状态中添加计时判断)
-            // *为了实现60秒敌机，我暂时移除了30秒强制Boss战的逻辑*
-            // *如果您想要Boss战，我们可能需要增加总时长或在 30 秒后切换到 Boss 状态*
+            if (gameTime >= BOSS_TIME && boss === null) {
+                 // 如果游戏需要强制Boss战，则在此处调用 startBossBattle()
+                 // startBossBattle();
+            }
         } else if (gameState === 'BossIntro') {
             boss.intro();
         } else if (gameState === 'BossFight') {
@@ -463,9 +697,7 @@ function update(currentTime) {
         player.y = mouseY;
 
         // 4. 更新子弹和对象位置
-        // ... (Player bullet update remains the same) ...
         bullets = bullets.filter(bullet => {
-             // ... bullet movement logic ...
             if (bullet.isHoming && bullet.target) {
                 const target = bullet.target; const angle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
                 bullet.x += Math.cos(angle) * bullet.speed; bullet.y += Math.sin(angle) * bullet.speed;
@@ -475,7 +707,6 @@ function update(currentTime) {
             return bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
         });
 
-        // V4.0: 敌机子弹更新和碰撞
         enemyBullets = enemyBullets.filter(bullet => {
             bullet.x += Math.cos(bullet.angle) * bullet.speed; bullet.y += Math.sin(bullet.angle) * bullet.speed;
             const playerCollisionObj = { x: player.x, y: player.y, width: player.width * 0.8, height: player.height * 0.8 };
@@ -488,7 +719,6 @@ function update(currentTime) {
             return bullet.y < GAME_HEIGHT + bullet.radius && bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
         });
 
-        // Boss 子弹更新和碰撞 (保持原样)
         bossBullets = bossBullets.filter(bullet => {
             bullet.x += Math.cos(bullet.angle) * bullet.speed; bullet.y += Math.sin(bullet.angle) * bullet.speed;
             const playerCollisionObj = { x: player.x, y: player.y, width: player.width * 0.8, height: player.height * 0.8 };
@@ -583,7 +813,6 @@ function resetGame() {
 // --- 8. 输入控制和状态切换 ---
 
 function handleInput(e) {
-    // ... (Mouse/Touch movement handling) ...
     if (e.touches && e.touches.length > 0) {
         const rect = canvas.getBoundingClientRect();
         mouseX = e.touches[0].clientX - rect.left;
@@ -622,30 +851,38 @@ function handleMenuClick(e) {
         }
     } else if (gameState === 'Upgrade') {
         const btnX = GAME_WIDTH / 2 - 150;
-        // 升级子菜单
-        if (checkClick(btnX, 230, 300, 60)) { /* Rate Upgrade Click */ }
-        else if (checkClick(btnX, 380, 300, 60)) { /* Size Upgrade Click */ }
-        
-        // 新增道具商店按钮
-        if (checkClick(btnX, 500, 300, 60)) { // 假设升级菜单上新增一个按钮
-             gameState = 'Shop';
-             return;
-        }
+        const btnW = 300;
+        const btnH = 60;
+        let y = 200; // 对应第一个升级的位置
 
-        // ... (原有的升级逻辑) ...
-        const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
-        if (checkClick(btnX, 230, 300, 60)) { // Rate Upgrade
+        // 1. 射速升级按钮 (Y=200 + 30 = 230)
+        if (checkClick(btnX, y + 30, btnW, btnH)) { 
+            const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
             if (upgrades.bulletRateLevel < MAX_UPGRADE_LEVEL && score >= UPGRADE_COST) {
                 score -= UPGRADE_COST; upgrades.bulletRateLevel++; saveUpgrades();
             }
-        } else if (checkClick(btnX, 380, 300, 60)) { // Size Upgrade
+        }
+        
+        y += 150; // 移动到下一个升级行 (Y=350)
+
+        // 2. 子弹大小升级按钮 (Y=350 + 30 = 380)
+        if (checkClick(btnX, y + 30, btnW, btnH)) { 
+            const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
             if (upgrades.bulletSizeLevel < MAX_UPGRADE_LEVEL && score >= UPGRADE_COST) {
                 score -= UPGRADE_COST; upgrades.bulletSizeLevel++; saveUpgrades();
             }
         }
+
+        y += 150; // 移动到道具商店行 (Y=500)
         
-        // 返回菜单按钮
-        else if (checkClick(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50)) {
+        // 3. 道具商店入口按钮 (Y=500 + 30 = 530)
+        if (checkClick(btnX, y + 30, btnW, btnH)) { 
+            gameState = 'Shop';
+            return;
+        }
+
+        // 4. 返回菜单按钮 (Y=GAME_HEIGHT - 80)
+        if (checkClick(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50)) {
             gameState = 'Menu';
         }
     } else if (gameState === 'Shop') {
@@ -662,46 +899,6 @@ function handleMenuClick(e) {
         gameOver = false; 
     }
 }
-
-// 在 drawUpgradeScreen 中添加进入商店的按钮
-function drawUpgradeScreen() {
-    ctx.font = '40px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center'; ctx.fillText('装备升级中心', GAME_WIDTH / 2, 80);
-    ctx.font = '24px Arial'; ctx.fillText(`当前分数 (货币): ${score} (1000分 = 1点)`, GAME_WIDTH / 2, 130);
-
-    const btnW = 300; const btnH = 60; const btnX = GAME_WIDTH / 2 - 150; let y = 200;
-    
-    // --- 1. 射速升级 ---
-    ctx.textAlign = 'left'; ctx.fillStyle = 'black';
-    ctx.fillText(`射速 (Lv.${upgrades.bulletRateLevel}/${MAX_UPGRADE_LEVEL})`, btnX, y);
-    ctx.fillText(`效果: 提高 ${upgrades.bulletRateLevel}% 射速`, btnX, y + 25);
-    if (upgrades.bulletRateLevel < MAX_UPGRADE_LEVEL) {
-        drawButton(btnX, y + 30, btnW, btnH, 
-            score >= UPGRADE_COST ? `升级 (1000 分)` : '分数不足', 
-            score >= UPGRADE_COST ? '#32CD32' : '#808080');
-    } else { drawButton(btnX, y + 30, btnW, btnH, '已满级', '#FF4500'); }
-    
-    y += 150;
-    
-    // --- 2. 子弹大小升级 ---
-    ctx.textAlign = 'left'; ctx.fillStyle = 'black';
-    ctx.fillText(`子弹大小 (Lv.${upgrades.bulletSizeLevel}/${MAX_UPGRADE_LEVEL})`, btnX, y);
-    ctx.fillText(`效果: 增大 ${upgrades.bulletSizeLevel}% 大小`, btnX, y + 25);
-    if (upgrades.bulletSizeLevel < MAX_UPGRADE_LEVEL) {
-        drawButton(btnX, y + 30, btnW, btnH, 
-            score >= UPGRADE_COST ? `升级 (1000 分)` : '分数不足', 
-            score >= UPGRADE_COST ? '#32CD32' : '#808080');
-    } else { drawButton(btnX, y + 30, btnW, btnH, '已满级', '#FF4500'); }
-
-    y += 150;
-    
-    // --- 3. 道具商店入口 ---
-    drawButton(btnX, y + 30, btnW, btnH, '进入道具商店', '#FFA500');
-
-
-    // 返回菜单按钮
-    drawButton(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50, '返回菜单', '#1E90FF');
-}
-
 
 canvas.addEventListener('mousemove', (e) => { 
     if (gameState !== 'Menu' && gameState !== 'Upgrade' && gameState !== 'Shop') handleInput(e); 
