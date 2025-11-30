@@ -274,26 +274,29 @@ function drawBullet(bullet) {
     ctx.shadowBlur = 0; 
 }
 
-// 绘制敌人 (改为红色圆形/子弹状)
+// 绘制敌人 (改为黑色圆球障碍物)
 function drawEnemy(enemy) {
     const radius = enemy.width / 2;
     ctx.save();
     ctx.translate(enemy.x, enemy.y);
     ctx.rotate(enemy.rotation); 
 
-    // Draw main body (Orange-Red for danger)
+    // Draw main body (Black Sphere)
     ctx.beginPath();
     ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fillStyle = '#FF4500'; 
+    ctx.fillStyle = '#000000'; // 纯黑色
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#333333';
     ctx.fill();
-    ctx.strokeStyle = '#CC3700';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    // Add a black center (bullet look)
+    // Add a white highlight for sphere effect
     ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.3, 0, Math.PI * 2);
-    ctx.fillStyle = '#000000';
+    ctx.arc(-radius * 0.3, -radius * 0.3, radius * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.fill();
 
     ctx.restore();
@@ -304,7 +307,6 @@ function drawEnemy(enemy) {
 
 // 碰撞检测 (保持原样)
 function checkCollision(objA, objB) {
-    // 使用简单的圆形碰撞检测，适用于子弹和道具
     const isCircle = objA.radius !== undefined;
     
     if (isCircle) {
@@ -320,11 +322,9 @@ function checkCollision(objA, objB) {
         let distY = objA.y - testY;
         let distance = Math.sqrt((distX * distX) + (distY * distY));
 
-        // 检查子弹/道具与敌人的碰撞
         return distance <= objA.radius; 
     } else {
-        // A, B 都是矩形 (用于玩家-敌人/Boss碰撞)
-        const A_halfW = objA.width / 2 * 0.8; // 缩小碰撞盒
+        const A_halfW = objA.width / 2 * 0.8; 
         const A_halfH = objA.height / 2 * 0.8;
         const B_halfW = objB.width / 2;
         const B_halfH = objB.height / 2;
@@ -336,7 +336,7 @@ function checkCollision(objA, objB) {
     }
 }
 
-// 敌人/道具生成逻辑 (减少道具生成几率)
+// 敌人/道具生成逻辑 (道具生成几率降为 1%)
 function spawnObject(currentTime) {
     if (gameState !== 'Playing' || gameOver) {
         return; 
@@ -351,8 +351,8 @@ function spawnObject(currentTime) {
     if (currentTime - lastEnemyTime > currentEnemyInterval) {
         const randomX = Math.random() * (GAME_WIDTH - 80) + 40; 
         
-        // **修改点 1: 道具生成几率降为 8%**
-        const isItem = Math.random() < 0.08; 
+        // **修改点 1: 道具生成几率降为 1%**
+        const isItem = Math.random() < 0.01; 
 
         if (isItem) {
             // 0:Triple, 1:Spread, 2:ClearScreen, 3:Wingman, 4:Homing
@@ -376,12 +376,13 @@ function spawnObject(currentTime) {
                 height: 30
             });
         } else {
+            // 障碍物 (黑色圆球)
             enemies.push({
                 x: randomX,
                 y: -50, 
                 width: 40, 
                 height: 40,
-                color: '#FF4500', // 敌人颜色已经通过 drawEnemy 函数固定
+                color: '#000000', // 颜色在 drawEnemy 中定义，这里仅作标记
                 speed: currentEnemySpeed, 
                 rotation: Math.random() * 0.1 - 0.05
             });
@@ -435,14 +436,16 @@ function shoot() {
     const bulletSpeed = 10;
     
     let homingTarget = null;
-    if (powerUp.type === 'Homing' && enemies.length > 0) {
-        homingTarget = enemies.reduce((closest, current) => {
-            const dist1 = Math.hypot(spawnX - closest.x, spawnY - closest.y);
-            const dist2 = Math.hypot(spawnX - current.x, spawnY - current.y);
-            return dist2 < dist1 ? current : closest;
-        }, enemies[0]);
-    } else if (powerUp.type === 'Homing' && boss) {
-        homingTarget = boss;
+    if (powerUp.type === 'Homing') {
+        if (boss) {
+            homingTarget = boss;
+        } else if (enemies.length > 0) {
+            homingTarget = enemies.reduce((closest, current) => {
+                const dist1 = Math.hypot(spawnX - closest.x, spawnY - closest.y);
+                const dist2 = Math.hypot(spawnX - current.x, spawnY - current.y);
+                return dist2 < dist1 ? current : closest;
+            }, enemies[0]);
+        }
     }
 
     const fireBullet = (x, y, isWingman = false) => {
@@ -484,59 +487,52 @@ function shoot() {
     }
 }
 
-// --- 4. Boss 逻辑 ---
+// --- 4. Boss 逻辑 (保持原样，Boss射击频率和三向散弹已调整) ---
 
 const BOSS_MOVE_SPEED = 2;
 let lastBossShotTime = 0;
-// **修改点 2: Boss 射击间隔更短 (更猛烈)**
-const BOSS_SHOT_INTERVAL = 800; 
+const BOSS_SHOT_INTERVAL = 800; // Boss 射击间隔更短
 
 function Boss() {
     this.x = GAME_WIDTH / 2;
-    this.y = -100; // 从上方入场
+    this.y = -100; 
     this.width = 150;
     this.height = 150;
     this.color = '#B22222';
     this.maxHealth = 200;
     this.health = 200;
-    this.isVulnerable = false; // 合体时不受伤害
+    this.isVulnerable = false; 
     this.targetX = GAME_WIDTH / 2;
     this.introStep = 0;
     this.bossTimeStart = Date.now();
     this.baseBulletSpeed = 3;
 
-    // Boss 入场动画 (障碍物合体)
     this.intro = function() {
         if (this.y < 150) {
-            this.y += 3; // 缓慢下降
+            this.y += 3; 
         } else {
             gameState = 'BossFight';
             this.isVulnerable = true;
         }
     }
 
-    // Boss 战斗更新
     this.update = function(currentTime) {
         if (!this.isVulnerable) return;
 
-        // 左右移动
         this.x += BOSS_MOVE_SPEED * Math.sin(currentTime / 1500);
         
-        // Boss 射击
         if (currentTime - lastBossShotTime > BOSS_SHOT_INTERVAL) {
             this.fire();
             lastBossShotTime = currentTime;
         }
     }
 
-    // Boss 射击逻辑 (改为三向散弹)
+    // Boss 射击逻辑 (三向散弹)
     this.fire = function() {
-        // 难度递增：Boss 子弹加速
         const bossTimeElapsed = Date.now() - this.bossTimeStart;
         const speedFactor = 1 + bossTimeElapsed / 45000; 
         const currentSpeed = this.baseBulletSpeed * speedFactor;
 
-        // **修改点 3: 三向散弹攻击**
         for (let angleOffset = -0.3; angleOffset <= 0.3; angleOffset += 0.3) { 
             const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
             const finalAngle = targetAngle + angleOffset; 
@@ -557,15 +553,15 @@ function Boss() {
     }
 }
 
-// 触发 Boss 战的函数 (在 update 循环中调用)
+// 触发 Boss 战的函数
 function startBossBattle() {
     gameState = 'BossIntro';
-    enemies = []; // 清空现有敌人
-    items = []; // 清空道具
+    enemies = []; 
+    items = []; 
     boss = new Boss();
 }
 
-// --- 5. 游戏核心循环 ---
+// --- 5. 游戏核心循环 (保持稳定) ---
 
 function update(currentTime) {
     if (gameOver) {
@@ -578,18 +574,15 @@ function update(currentTime) {
 
     gameTime = Date.now() - gameStartTimestamp;
     
-    // 游戏结束计时
     if (gameTime >= GAME_DURATION) {
         gameOver = true;
     }
 
-    // 检查并应用道具状态
     checkPowerUpStatus();
 
     // 1. 状态机逻辑
     if (gameState === 'Playing') {
         spawnObject(currentTime);
-        // 触发 Boss 战
         if (gameTime >= BOSS_TIME) {
             startBossBattle();
         }
@@ -613,7 +606,7 @@ function update(currentTime) {
     player.x = mouseX;
     player.y = mouseY;
 
-    // 5. 更新子弹和对象位置 (逻辑不变)
+    // 5. 更新子弹和对象位置 (保持稳定)
     bullets = bullets.filter(bullet => {
         if (bullet.isHoming && bullet.target) {
             const target = bullet.target;
@@ -629,12 +622,10 @@ function update(currentTime) {
         return bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
     });
 
-    // Boss 子弹更新
     bossBullets = bossBullets.filter(bullet => {
         bullet.x += Math.cos(bullet.angle) * bullet.speed;
         bullet.y += Math.sin(bullet.angle) * bullet.speed;
         
-        // 碰撞检测：Boss子弹击中玩家
         const playerCollisionObj = { x: player.x, y: player.y, width: player.width * 0.8, height: player.height * 0.8 };
         const bossBulletCollisionObj = { x: bullet.x, y: bullet.y, radius: bullet.radius };
 
@@ -643,7 +634,7 @@ function update(currentTime) {
             if (player.health <= 0) {
                 gameOver = true;
                 player.health = 0;
-                player.hasWingman = false; // 清除僚机
+                player.hasWingman = false; 
             }
             return false; 
         }
@@ -651,7 +642,6 @@ function update(currentTime) {
         return bullet.y < GAME_HEIGHT + bullet.radius && bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
     });
     
-    // 敌人更新和碰撞检测 (与玩家)
     enemies = enemies.filter(enemy => {
         enemy.y += enemy.speed; 
         enemy.rotation += 0.01; 
@@ -669,7 +659,6 @@ function update(currentTime) {
         return enemy.y < GAME_HEIGHT + enemy.height; 
     });
 
-    // 道具更新和碰撞检测 (与玩家)
     items = items.filter(item => {
         item.y += item.speed;
         item.rotation += 0.05; 
@@ -686,7 +675,7 @@ function update(currentTime) {
     });
 
 
-    // 6. 碰撞检测：子弹击中敌人/Boss (逻辑不变)
+    // 6. 碰撞检测：子弹击中敌人/Boss
     for (let i = 0; i < bullets.length; i++) {
         let bulletHit = false;
         const bulletCollisionObj = { x: bullets[i].x, y: bullets[i].y, radius: bullets[i].radius };
@@ -736,16 +725,13 @@ function update(currentTime) {
 // 统一处理鼠标和触摸输入
 function handleInput(e) {
     if (e.touches && e.touches.length > 0) {
-        // 移动端触摸：使用触摸点的坐标，并减去 Canvas 相对窗口的位置
         const rect = canvas.getBoundingClientRect();
         mouseX = e.touches[0].clientX - rect.left;
         mouseY = e.touches[0].clientY - rect.top;
     } else {
-        // 桌面鼠标
         mouseX = e.offsetX; 
         mouseY = e.offsetY; 
     }
-    // 阻止默认滚动/缩放行为，确保手机上拖动时不会滚动网页
     e.preventDefault();
 }
 
