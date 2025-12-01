@@ -47,8 +47,8 @@ let player = {
 
 let powerUp = { type: 'Normal', duration: 0, endTime: 0 };
 let bullets = []; 
-let enemies = []; // Boss 战模式下此数组为空，但保留
-let enemyBullets = []; // Boss 战模式下此数组为空，但保留
+let enemies = []; 
+let enemyBullets = []; 
 let items = []; 
 let boss = null; 
 let bossBullets = []; 
@@ -106,8 +106,7 @@ function getBulletRadius() {
 }
 
 
-// --- 2. 游戏对象绘制函数 (排版优化保持不变) ---
-
+// --- 2. 游戏对象绘制
 function drawSinglePlane(x, y, rotation, bodyColor, wingColor) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(rotation); 
     const width = player.width; const height = player.height; const darkShade = '#5f9ea0';    
@@ -260,7 +259,7 @@ function drawItemButtons() {
 
 function applyPowerUp(type) {
     const duration = 8000;
-    if (type === 'ClearScreen') { bossBullets = []; return; } // Boss 战模式只清 Boss 子弹
+    if (type === 'ClearScreen') { bossBullets = []; return; } 
     
     if (type === 'Wingman') { player.hasWingman = true; return; }
     
@@ -405,7 +404,7 @@ function handleShopClick(clickX, clickY) {
 }
 
 
-// --- 4. 障碍物生成和行为 (Boss战模式) ---
+// --- 4. 碰撞和射击工具函数 ---
 
 function checkCollision(objA, objB) {
     const isCircle = objA.radius !== undefined;
@@ -463,7 +462,7 @@ function shoot() {
 }
 
 
-// --- 5. Boss 逻辑 (60秒，每10秒提升10%，最后10秒全屏散弹) ---
+// --- 5. Boss 逻辑 (修复 Boss 射击计时器) ---
 
 function Boss() {
     this.x = GAME_WIDTH / 2; this.y = -100; 
@@ -472,12 +471,16 @@ function Boss() {
     this.maxHealth = 2000; this.health = 2000; 
     this.isVulnerable = false; 
     this.bossTimeStart = Date.now();
-    this.lastShotTime = 0;
+    this.lastShotTime = 0; // 初始为 0 确保立即射击
     this.baseInterval = 800; // 基础射击间隔
 
     this.intro = function() {
-        // Boss 从顶部滑入
-        if (this.y < 150) { this.y += 3; } else { gameState = 'BossFight'; this.isVulnerable = true; }
+        if (this.y < 150) { this.y += 3; } else { 
+            gameState = 'BossFight'; 
+            this.isVulnerable = true; 
+            // 修复 V5.3: 确保开始战斗时重置 lastShotTime，让 Boss 立即攻击
+            this.lastShotTime = Date.now(); 
+        }
     }
 
     this.getShotInterval = function(elapsedTime) {
@@ -502,6 +505,7 @@ function Boss() {
         
         this.x += 2 * Math.sin(currentTime / 1500); // Boss 移动
         
+        // 核心修复 V5.3: 使用 this.lastShotTime 与 currentTime 比较
         if (currentTime - this.lastShotTime > currentInterval) {
             this.fire(elapsedTime);
             this.lastShotTime = currentTime;
@@ -530,8 +534,9 @@ function Boss() {
                 const angleOffset = -0.3 + i * angleStep;
                 const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
                 const finalAngle = targetAngle + angleOffset; 
+                // 修复 V5.3: 确保子弹从 Boss 附近发射
                 bossBullets.push({
-                    x: this.x + Math.cos(finalAngle) * 50, y: this.y + Math.sin(finalAngle) * 50, 
+                    x: this.x + Math.cos(finalAngle) * 50, y: this.y + Math.sin(finalAngle) * 50 + 50, 
                     radius: 6, speed: currentSpeed, angle: finalAngle, damage: 10
                 });
             }
@@ -540,7 +545,6 @@ function Boss() {
 }
 
 function startBossBattle() {
-    // V5.1 修复: 确保 boss 实例被创建
     boss = new Boss();
 }
 
@@ -570,12 +574,12 @@ function update(currentTime) {
         // 游戏结束判断：时间到或 Boss 被击败
         if (gameTime >= GAME_DURATION) { 
             gameOver = true; 
-            if (boss) score += boss.health * 10; // 剩余血量转换成分数
+            if (boss) score += boss.health * 10; 
             saveUpgrades(); 
         }
-        if (boss && boss.health <= 0) {
+        if (boss && boss.health <= 0) { 
             gameOver = true; 
-            score += 5000; // 额外 Boss 奖励
+            score += 5000; 
             saveUpgrades();
         }
 
@@ -583,7 +587,6 @@ function update(currentTime) {
         
         // 1. 状态机逻辑
         if (gameState === 'BossIntro') {
-            // V5.1 检查: 确保 Boss 实例存在，然后开始入场
             if (boss) boss.intro(); 
         } else if (gameState === 'BossFight') {
             if (boss) boss.update(currentTime);
@@ -599,7 +602,7 @@ function update(currentTime) {
         player.x = mouseX;
         player.y = mouseY;
 
-        // 4. 更新子弹和对象位置 (只保留 Boss 战相关)
+        // 4. 更新子弹和对象位置
         bullets = bullets.filter(bullet => {
             if (bullet.isHoming && bullet.target) {
                 const target = bullet.target; const angle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
@@ -632,9 +635,9 @@ function update(currentTime) {
             if (boss && boss.isVulnerable && checkCollision(bulletCollisionObj, boss)) {
                 score += 1; 
                 boss.health -= 1; 
-                return false; // 子弹消失
+                return false; 
             }
-            return true; // 子弹继续存在
+            return true; 
         });
 
 
@@ -705,8 +708,8 @@ function handleMenuClick(e) {
         // 开始 Boss 挑战按钮
         if (checkClick(btnX, GAME_HEIGHT / 2 - 50, 300, 70)) {
             resetGame();
-            startBossBattle(); // 启动 Boss 实例
-            gameState = 'BossIntro'; // 进入 Boss 入场动画
+            startBossBattle(); 
+            gameState = 'BossIntro'; 
         }
         // 升级装备按钮
         else if (checkClick(btnX, GAME_HEIGHT / 2 + 50, 300, 70)) {
@@ -718,7 +721,6 @@ function handleMenuClick(e) {
         const btnH = 60;
         let y = 200; 
 
-        // ... (升级逻辑保持不变) ...
         // 1. 射速升级按钮
         if (checkClick(btnX, y + 30, btnW, btnH)) { 
             const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
