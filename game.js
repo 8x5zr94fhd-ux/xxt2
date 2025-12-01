@@ -5,91 +5,47 @@ const ctx = canvas.getContext('2d');
 const GAME_WIDTH = canvas.width;
 const GAME_HEIGHT = canvas.height;
 
-// 游戏状态变量
-let gameTime = 0; 
-const GAME_DURATION = 60000; // 游戏总时长 60 秒
-let gameState = 'Menu'; 
-
-// 升级和道具系统配置
+// 游戏状态常量
+const GAME_DURATION = 60000; // 60 秒 Boss 战
 const MAX_UPGRADE_LEVEL = 20;
 const UPGRADE_COST = 1000; 
 const BASE_SHOT_INTERVAL = 200; 
 const ITEM_COST = 2000; 
+const BOSS_MAX_HEALTH = 2000;
 
-// 玩家升级状态 (持久化)
+// 状态变量
+let gameTime = 0; 
+let gameState = 'Menu'; 
+let gameOver = false; 
+let gameStartTimestamp = 0; 
+
+// 玩家升级和道具 (持久化)
 let upgrades = {
     bulletRateLevel: parseInt(localStorage.getItem('bulletRateLevel') || 0),
     bulletSizeLevel: parseInt(localStorage.getItem('bulletSizeLevel') || 0)
 };
-
-// 玩家道具库存 (持久化)
 let inventory = JSON.parse(localStorage.getItem('inventory') || '{}');
 const ITEM_TYPES = ['Triple', 'Spread', 'Homing', 'Speed', 'Wingman', 'ClearScreen'];
-ITEM_TYPES.forEach(type => {
-    if (inventory[type] === undefined) {
-        inventory[type] = 0;
-    }
-});
+ITEM_TYPES.forEach(type => { if (inventory[type] === undefined) { inventory[type] = 0; } });
 
 // 玩家对象
 let player = {
     x: GAME_WIDTH / 2, 
     y: GAME_HEIGHT - 100, 
-    width: 60, 
-    height: 70,
-    color: '#87CEEB',
-    baseSpeed: 5, 
-    speed: 5, 
-    health: 100, 
-    maxHealth: 100,
-    hasWingman: false
+    width: 60, height: 70, color: '#87CEEB',
+    baseSpeed: 5, speed: 5, 
+    health: 100, maxHealth: 100, hasWingman: false
 };
 
 let powerUp = { type: 'Normal', duration: 0, endTime: 0 };
-let bullets = []; 
-let enemies = []; 
-let enemyBullets = []; 
-let items = []; 
-let boss = null; 
-let bossBullets = []; 
+let bullets = [];       // 玩家子弹
+let boss = null;        // Boss 对象
+let bossBullets = [];   // Boss 子弹
 
 let mouseX = player.x; 
 let mouseY = player.y; 
-
 let score = parseInt(localStorage.getItem('currentScore') || 0); 
 let lastShotTime = 0;
-let currentShotInterval = BASE_SHOT_INTERVAL; 
-
-const ENEMY_HEALTH = 3; 
-
-let gameOver = false; 
-let gameStartTimestamp = 0; 
-// V5.4 修复: 移除冗余的 currentBossPhase 变量，直接从 Boss 对象中获取。
-
-// --- 背景星星 (保持不变) ---
-let stars = [];
-for (let i = 0; i < 50; i++) {
-    stars.push({
-        x: Math.random() * GAME_WIDTH,
-        y: Math.random() * GAME_HEIGHT,
-        radius: Math.random() * 1.5,
-        speed: Math.random() * 0.5 + 0.1, 
-        color: `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.5})`
-    });
-}
-function drawStars() {
-    stars.forEach(star => {
-        star.y += star.speed;
-        if (star.y > GAME_HEIGHT) {
-            star.y = 0;
-            star.x = Math.random() * GAME_WIDTH;
-        }
-        ctx.beginPath();
-        ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-        ctx.fillStyle = star.color;
-        ctx.fill();
-    });
-}
 
 function saveUpgrades() {
     localStorage.setItem('bulletRateLevel', upgrades.bulletRateLevel);
@@ -105,8 +61,115 @@ function getBulletRadius() {
     return 5 * (1 + upgrades.bulletSizeLevel * 0.01); 
 }
 
+// --- 2. 背景和视觉效果 ---
+let stars = [];
+for (let i = 0; i < 50; i++) {
+    stars.push({
+        x: Math.random() * GAME_WIDTH, y: Math.random() * GAME_HEIGHT,
+        radius: Math.random() * 1.5, speed: Math.random() * 0.5 + 0.1, 
+        color: `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.5})`
+    });
+}
+function drawStars() {
+    stars.forEach(star => {
+        star.y += star.speed;
+        if (star.y > GAME_HEIGHT) { star.y = 0; star.x = Math.random() * GAME_WIDTH; }
+        ctx.beginPath(); ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+        ctx.fillStyle = star.color; ctx.fill();
+    });
+}
 
-// --- 2. 游戏对象绘制
+
+// --- 3. Boss 逻辑类 ---
+
+function Boss() {
+    this.x = GAME_WIDTH / 2; this.y = -100; 
+    this.width = 150; this.height = 150;
+    this.color = '#B22222';
+    this.maxHealth = BOSS_MAX_HEALTH; this.health = BOSS_MAX_HEALTH; 
+    this.isVulnerable = false;
+    this.bossTimeStart = Date.now();
+    this.lastShotTime = 0;
+    this.baseInterval = 800; // 基础射击间隔
+
+    this.intro = function() {
+        if (this.y < 150) { this.y += 3; } else { 
+            gameState = 'BossFight'; 
+            this.isVulnerable = true; 
+            this.lastShotTime = Date.now(); 
+        }
+    }
+    
+    this.getDifficultyParams = function(elapsedTime) {
+        const phaseDuration = 10000; // 每个阶段 10 秒
+        const phaseIndex = Math.floor(elapsedTime / phaseDuration); 
+        const currentPhase = phaseIndex + 1; 
+        
+        let intervalMultiplier = Math.max(0.5, 1 - 0.1 * phaseIndex); 
+        let speedMultiplier = 1 + 0.1 * phaseIndex;
+        
+        return {
+            currentPhase: currentPhase,
+            interval: this.baseInterval * intervalMultiplier,
+            speed: 3 * speedMultiplier,
+            shots: 1 + Math.floor(elapsedTime / 15000) 
+        };
+    }
+
+    this.update = function(currentTime) {
+        if (!this.isVulnerable) return;
+
+        const elapsedTime = currentTime - this.bossTimeStart;
+        const params = this.getDifficultyParams(elapsedTime);
+        
+        // Boss 移动
+        this.x = GAME_WIDTH / 2 + 50 * Math.sin(currentTime / 1500); 
+        
+        // 射击计时器
+        if (currentTime - this.lastShotTime > params.interval) {
+            this.fire(elapsedTime, params.speed, params.shots);
+            this.lastShotTime = currentTime;
+        }
+    }
+
+    this.fire = function(elapsedTime, currentSpeed, numTrackingShots) {
+        if (elapsedTime >= 50000) {
+            // 阶段 6: 360 度散弹
+            const numBullets = 25; 
+            for (let i = 0; i < numBullets; i++) {
+                const angle = (i * 360 / numBullets) * Math.PI / 180;
+                bossBullets.push({
+                    x: this.x, y: this.y + 75, angle: angle, 
+                    radius: 8, speed: currentSpeed * 1.5, damage: 15
+                });
+            }
+        } else {
+            // 阶段 1-5: 扇形追踪射击
+            const angleSpread = 0.5; 
+            const angleStep = numTrackingShots > 1 ? angleSpread / (numTrackingShots - 1) : 0;
+            const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
+
+            for (let i = 0; i < numTrackingShots; i++) {
+                const angleOffset = -angleSpread / 2 + i * angleStep;
+                const finalAngle = targetAngle + angleOffset; 
+                
+                bossBullets.push({
+                    x: this.x + Math.cos(finalAngle) * 50, 
+                    y: this.y + Math.sin(finalAngle) * 50 + 75, 
+                    radius: 6, speed: currentSpeed, angle: finalAngle, damage: 10
+                });
+            }
+        }
+    }
+}
+
+function startBossBattle() {
+    boss = new Boss();
+}
+
+
+// --- 4. 绘制所有对象 (玩家、Boss、子弹、UI) ---
+
 function drawSinglePlane(x, y, rotation, bodyColor, wingColor) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(rotation); 
     const width = player.width; const height = player.height; const darkShade = '#5f9ea0';    
@@ -138,12 +201,14 @@ function drawBoss() {
     // 绘制 Boss 血条
     const barX = GAME_WIDTH / 2 - 150; const barY = 80; const barWidth = 300; const barHeight = 25;
     ctx.fillStyle = '#ccc'; ctx.fillRect(barX, barY, barWidth, barHeight);
-    const currentHealthWidth = (boss.health / boss.maxHealth) * barWidth;
+    const currentHealthWidth = (Math.max(0, boss.health) / boss.maxHealth) * barWidth; 
     ctx.fillStyle = 'red'; ctx.fillRect(barX, barY, currentHealthWidth, barHeight);
     ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.strokeRect(barX, barY, barWidth, barHeight);
     
-    // V5.4 修复: 确保阶段显示逻辑是正确的
-    const phaseText = boss.isVulnerable ? `阶段 ${boss.currentPhase}/6` : '入场中...';
+    // 绘制血条文本
+    const elapsedTime = Date.now() - boss.bossTimeStart;
+    const currentPhase = boss.getDifficultyParams(elapsedTime).currentPhase;
+    const phaseText = boss.isVulnerable ? `阶段 ${currentPhase}/6` : '入场中...';
     
     ctx.font = '20px "Microsoft YaHei", Arial'; 
     ctx.fillStyle = 'black'; 
@@ -151,16 +216,15 @@ function drawBoss() {
     ctx.fillText(`BOSS HP: ${Math.max(0, boss.health)}/${boss.maxHealth} (${phaseText})`, GAME_WIDTH / 2, barY + 18);
 }
 
-function drawBossBullet(bullet) {
-    ctx.beginPath();
-    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
-    ctx.fillStyle = '#FF0000'; ctx.shadowBlur = 10; ctx.shadowColor = '#FF0000'; ctx.fill(); ctx.shadowBlur = 0;
-}
-
 function drawBullet(bullet) {
     const radius = getBulletRadius(); 
     ctx.beginPath(); ctx.arc(bullet.x, bullet.y, radius, 0, Math.PI * 2); 
     ctx.fillStyle = '#FFD700'; ctx.shadowBlur = 15; ctx.shadowColor = '#FFD700'; ctx.fill(); ctx.shadowBlur = 0; 
+}
+function drawBossBullet(bullet) {
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    ctx.fillStyle = '#FF0000'; ctx.shadowBlur = 10; ctx.shadowColor = '#FF0000'; ctx.fill(); ctx.shadowBlur = 0;
 }
 
 function drawUpgradeIndicators() {
@@ -224,9 +288,6 @@ function drawText() {
     ctx.textAlign = 'left'; 
 }
 
-
-// --- 3. 道具和菜单 (保持不变) ---
-
 const ITEM_BUTTONS = [
     { type: 'Triple', text: 'x3', color: '#FFC0CB', x: 20, y: GAME_HEIGHT - 60, radius: 25 },
     { type: 'Spread', text: 'S', color: '#8A2BE2', x: 80, y: GAME_HEIGHT - 60, radius: 25 },
@@ -265,32 +326,8 @@ function drawItemButtons() {
     });
 }
 
-function applyPowerUp(type) {
-    const duration = 8000;
-    if (type === 'ClearScreen') { bossBullets = []; return; } 
-    
-    if (type === 'Wingman') { player.hasWingman = true; return; }
-    
-    player.speed = player.baseSpeed; 
-    powerUp.type = type; powerUp.duration = duration; powerUp.endTime = Date.now() + duration;
-    if (type === 'Speed') { player.speed *= 1.5; }
-}
 
-function checkPowerUpStatus() {
-    if (powerUp.type !== 'Normal' && Date.now() > powerUp.endTime) {
-        powerUp.type = 'Normal'; powerUp.duration = 0; player.speed = player.baseSpeed; 
-    }
-}
-
-function activateItem(type) {
-    if (type === 'Wingman' && player.hasWingman) return;
-    if (inventory[type] <= 0) return;
-    
-    applyPowerUp(type);
-    
-    inventory[type]--;
-    saveUpgrades();
-}
+// --- 5. 菜单和商店绘制与逻辑 ---
 
 function drawButton(x, y, w, h, text, color) {
     ctx.fillStyle = color; ctx.fillRect(x, y, w, h);
@@ -340,7 +377,6 @@ function drawUpgradeScreen() {
     
     // --- 3. 道具商店入口 ---
     drawButton(btnX, y + 30, btnW, btnH, '进入道具商店', '#FFA500');
-
 
     // 返回菜单按钮
     drawButton(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50, '返回菜单', '#1E90FF');
@@ -412,21 +448,24 @@ function handleShopClick(clickX, clickY) {
 }
 
 
-// --- 4. 碰撞和射击工具函数 ---
+// --- 6. 碰撞、射击和道具逻辑 ---
 
 function checkCollision(objA, objB) {
     const isCircle = objA.radius !== undefined;
     if (isCircle) {
         let testX = objA.x; let testY = objA.y;
-        if (objA.x < objB.x - objB.width / 2) testX = objB.x - objB.width / 2;
-        else if (objA.x > objB.x + objB.width / 2) testX = objB.x + objB.width / 2;
-        if (objA.y < objB.y - objB.height / 2) testY = objB.y - objB.height / 2;
-        else if (objA.y > objB.y + objB.height / 2) testY = objB.y + objB.height / 2;
+        const B_halfW = objB.width / 2; const B_halfH = objB.height / 2;
+        const B_centerX = objB.x; const B_centerY = objB.y;
+
+        if (objA.x < B_centerX - B_halfW) testX = B_centerX - B_halfW;
+        else if (objA.x > B_centerX + B_halfW) testX = B_centerX + B_halfW;
+        if (objA.y < B_centerY - B_halfH) testY = B_centerY - B_halfH;
+        else if (objA.y > B_centerY + B_halfH) testY = B_centerY + B_halfH;
+        
         let distX = objA.x - testX; let distY = objA.y - testY;
         let distance = Math.sqrt((distX * distX) + (distY * distY));
         return distance <= objA.radius; 
     } else {
-        // 矩形碰撞 (用于玩家 vs Boss)
         const A_halfW = objA.width / 2 * 0.8; const A_halfH = objA.height / 2 * 0.8;
         const B_halfW = objB.width / 2; const B_halfH = objB.height / 2;
         return objA.x + A_halfW > objB.x - B_halfW &&
@@ -436,8 +475,35 @@ function checkCollision(objA, objB) {
     }
 }
 
+function applyPowerUp(type) {
+    const duration = 8000;
+    if (type === 'ClearScreen') { bossBullets = []; return; } 
+    
+    if (type === 'Wingman') { player.hasWingman = true; return; }
+    
+    player.speed = player.baseSpeed; 
+    powerUp.type = type; powerUp.duration = duration; powerUp.endTime = Date.now() + duration;
+    if (type === 'Speed') { player.speed *= 1.5; }
+}
+
+function checkPowerUpStatus() {
+    if (powerUp.type !== 'Normal' && Date.now() > powerUp.endTime) {
+        powerUp.type = 'Normal'; powerUp.duration = 0; player.speed = player.baseSpeed; 
+    }
+}
+
+function activateItem(type) {
+    if (type === 'Wingman' && player.hasWingman) return;
+    if (inventory[type] <= 0) return;
+    
+    applyPowerUp(type);
+    
+    inventory[type]--;
+    saveUpgrades();
+}
+
 function shoot() {
-    if (gameOver) return; if (player.health <= 0) return; 
+    if (gameOver || player.health <= 0) return; 
 
     const bulletRadius = getBulletRadius();
     const spawnY = player.y - player.height / 2;
@@ -446,39 +512,28 @@ function shoot() {
     
     let homingTarget = null;
     if (powerUp.type === 'Homing') {
-        if (boss) { homingTarget = boss; } 
+        if (boss) homingTarget = boss; 
     }
 
     const fireBullet = (x, y, isWingman = false, angleRad = 0) => {
         bullets.push({ 
-            x: x, 
-            y: y, 
-            radius: bulletRadius, 
-            speed: bulletSpeed, 
-            isHoming: powerUp.type === 'Homing', 
-            target: homingTarget, 
-            isWingman: isWingman, 
-            angle: angleRad 
+            x: x, y: y, radius: bulletRadius, speed: bulletSpeed, 
+            isHoming: powerUp.type === 'Homing', target: homingTarget, 
+            isWingman: isWingman, angle: angleRad 
         });
     };
 
     if (powerUp.type === 'Spread') {
-        // Spread 射击：扇形，角度范围 -30 到 30 度
         for (let angle = -30; angle <= 30; angle += 15) { 
             const angleRad = angle * Math.PI / 180;
             fireBullet(spawnX, spawnY, false, angleRad);
         }
     } else if (powerUp.type === 'Triple') {
-        // Triple 射击：三颗子弹，中央，左侧，右侧
-        fireBullet(spawnX, spawnY); 
-        fireBullet(spawnX - 15, spawnY + 10); 
-        fireBullet(spawnX + 15, spawnY + 10); 
+        fireBullet(spawnX, spawnY); fireBullet(spawnX - 15, spawnY + 10); fireBullet(spawnX + 15, spawnY + 10); 
     } else {
-        // 普通或追踪射击
         fireBullet(spawnX, spawnY);
     }
     
-    // 僚机射击
     if (player.hasWingman && powerUp.type !== 'Spread' && powerUp.type !== 'Triple') {
          fireBullet(player.x - 60, player.y + 10, true); 
          fireBullet(player.x + 60, player.y + 10, true); 
@@ -486,227 +541,127 @@ function shoot() {
 }
 
 
-// --- 5. Boss 逻辑 (核心重构和稳定化) ---
-
-function Boss() {
-    this.x = GAME_WIDTH / 2; this.y = -100; 
-    this.width = 150; this.height = 150;
-    this.color = '#B22222';
-    this.maxHealth = 2000; this.health = 2000; 
-    this.isVulnerable = false; // 只有入场后才可受伤
-    this.bossTimeStart = Date.now(); // 记录 Boss 战开始时间
-    this.lastShotTime = 0; // 上次射击时间
-    this.baseInterval = 800; // 基础射击间隔 (毫秒)
-    this.currentPhase = 1;
-
-    this.intro = function() {
-        // Boss 从顶部滑入
-        if (this.y < 150) { this.y += 3; } else { 
-            gameState = 'BossFight'; 
-            this.isVulnerable = true; 
-            this.lastShotTime = Date.now(); // 确保 Boss 开始攻击
-        }
-    }
-
-    this.getDifficultyParams = function(elapsedTime) {
-        const phaseDuration = 10000; // 每个阶段 10 秒
-        // 阶段 1: 0-10s, 阶段 2: 10-20s, ... 阶段 6: 50-60s
-        const phaseIndex = Math.floor(elapsedTime / phaseDuration); 
-        this.currentPhase = phaseIndex + 1; // 1 到 6
-        
-        // 射击间隔乘数 (每阶段减少 10%)
-        let intervalMultiplier = Math.max(0.5, 1 - 0.1 * phaseIndex); 
-        // 子弹速度乘数 (每阶段增加 10%)
-        let speedMultiplier = 1 + 0.1 * phaseIndex;
-        
-        return {
-            interval: this.baseInterval * intervalMultiplier,
-            speed: 3 * speedMultiplier,
-            shots: 1 + Math.floor(elapsedTime / 15000) // 0s: 1, 15s: 2, 30s: 3, 45s: 4
-        };
-    }
-
-    this.update = function(currentTime) {
-        if (!this.isVulnerable) return;
-
-        const elapsedTime = currentTime - this.bossTimeStart;
-        const params = this.getDifficultyParams(elapsedTime);
-        
-        this.x += 2 * Math.sin(currentTime / 1500); // Boss 左右小幅移动
-        
-        // V5.4 修复: 确保 Boss 射击逻辑正确触发
-        if (currentTime - this.lastShotTime > params.interval) {
-            this.fire(elapsedTime, params.speed, params.shots);
-            this.lastShotTime = currentTime;
-        }
-    }
-
-    this.fire = function(elapsedTime, currentSpeed, numTrackingShots) {
-        
-        if (elapsedTime >= 50000) {
-            // 阶段 6: 360 度全屏散弹
-            const numBullets = 20; 
-            for (let i = 0; i < numBullets; i++) {
-                const angle = (i * 360 / numBullets) * Math.PI / 180;
-                bossBullets.push({
-                    x: this.x, y: this.y + 75, 
-                    radius: 8, speed: currentSpeed * 1.2, angle: angle, damage: 15
-                });
-            }
-        } else {
-            // 阶段 1-5: 扇形追踪射击 (数量随时间增加)
-            const angleSpread = 0.6; // 0.6 弧度 ≈ 34 度
-            const angleStep = numTrackingShots > 1 ? angleSpread / (numTrackingShots - 1) : 0;
-            const targetAngle = Math.atan2(player.y - this.y, player.x - this.x);
-
-            for (let i = 0; i < numTrackingShots; i++) {
-                const angleOffset = -angleSpread / 2 + i * angleStep;
-                const finalAngle = targetAngle + angleOffset; 
-                
-                bossBullets.push({
-                    x: this.x + Math.cos(finalAngle) * 50, // 从 Boss 前端发射
-                    y: this.y + Math.sin(finalAngle) * 50 + 75, 
-                    radius: 6, speed: currentSpeed, angle: finalAngle, damage: 10
-                });
-            }
-        }
-    }
-}
-
-function startBossBattle() {
-    boss = new Boss();
-}
-
-
-// --- 6. 游戏核心循环 ---
+// --- 7. 游戏核心循环 ---
 
 function update(currentTime) {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
 
-    if (gameState === 'Menu') {
-        drawMenu();
-    } else if (gameState === 'Upgrade') {
-        drawUpgradeScreen();
-    } else if (gameState === 'Shop') {
-        drawShopScreen();
-    } else { 
-        if (gameOver) {
-            drawPlayer(); if (boss) drawBoss(); drawText(); 
-            requestAnimationFrame(update);
-            return;
-        }
-
-        gameTime = Date.now() - gameStartTimestamp;
-        currentShotInterval = getShotInterval();
-        
-        // 游戏结束判断：时间到或 Boss 被击败
-        if (gameTime >= GAME_DURATION) { 
-            gameOver = true; 
-            if (boss) score += boss.health * 10; 
-            saveUpgrades(); 
-        }
-        if (boss && boss.health <= 0) { 
-            gameOver = true; 
-            score += 5000; 
-            saveUpgrades();
-        }
-
-        checkPowerUpStatus();
-        
-        // 1. 状态机逻辑
-        if (gameState === 'BossIntro') {
-            if (boss) boss.intro(); 
-        } else if (gameState === 'BossFight') {
-            if (boss) boss.update(currentTime);
-        }
-        
-        // 2. 自动射击
-        if (gameState !== 'BossIntro' && gameTime - lastShotTime > currentShotInterval) {
-            shoot();
-            lastShotTime = gameTime;
-        }
-
-        // 3. 更新玩家位置
-        player.x = mouseX;
-        player.y = mouseY;
-
-        // 4. 更新子弹和对象位置
-        bullets = bullets.filter(bullet => {
-            if (bullet.isHoming && bullet.target) {
-                // Homing 逻辑
-                const target = bullet.target; 
-                const angle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
-                bullet.x += Math.cos(angle) * bullet.speed; 
-                bullet.y += Math.sin(angle) * bullet.speed;
-            } else if (bullet.angle !== undefined && bullet.angle !== 0) {
-                // Spread 逻辑
-                bullet.x += Math.sin(bullet.angle) * bullet.speed; 
-                bullet.y -= Math.cos(bullet.angle) * bullet.speed;
-            } else { 
-                // Normal/Triple 逻辑
-                bullet.y -= bullet.speed; 
-            }
-            return bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
-        });
-
-        // Boss 子弹更新和碰撞
-        bossBullets = bossBullets.filter(bullet => {
-            // Boss 子弹移动逻辑
-            bullet.x += Math.cos(bullet.angle) * bullet.speed; 
-            bullet.y += Math.sin(bullet.angle) * bullet.speed;
-            
-            // 碰撞检测
-            const playerCollisionObj = { x: player.x, y: player.y, width: player.width * 0.8, height: player.height * 0.8 };
-            const bossBulletCollisionObj = { x: bullet.x, y: bullet.y, radius: bullet.radius };
-            if (checkCollision(bossBulletCollisionObj, playerCollisionObj)) {
-                if (!player.hasWingman) { 
-                    player.health -= bullet.damage;
-                    if (player.health <= 0) { gameOver = true; player.health = 0; player.hasWingman = false; saveUpgrades(); }
-                }
-                return false; // Boss 子弹消失
-            }
-            // 边界检查
-            return bullet.y < GAME_HEIGHT + bullet.radius && bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
-        });
-        
-        // 5. 碰撞检测：子弹击中 Boss
-        bullets = bullets.filter(bullet => {
-            const bulletCollisionObj = { x: bullet.x, y: bullet.y, radius: bullet.radius };
-            
-            if (boss && boss.isVulnerable && checkCollision(bulletCollisionObj, boss)) {
-                score += 1; 
-                boss.health -= 1; 
-                return false; 
-            }
-            return true; 
-        });
-
-
-        // 6. 绘制所有对象
-        drawPlayer();
-        bullets.forEach(drawBullet);
-        bossBullets.forEach(drawBossBullet);
-        if (boss) drawBoss();
-        
-        drawText(); 
-        drawHealthBar(); 
-        drawItemButtons(); 
+    // 菜单/商店/升级界面
+    if (gameState === 'Menu' || gameState === 'Upgrade' || gameState === 'Shop') {
+        if (gameState === 'Menu') drawMenu();
+        if (gameState === 'Upgrade') drawUpgradeScreen();
+        if (gameState === 'Shop') drawShopScreen();
+        requestAnimationFrame(update);
+        return;
     }
+    
+    // 游戏结束画面
+    if (gameOver) {
+        drawPlayer(); if (boss) drawBoss(); drawText(); 
+        requestAnimationFrame(update);
+        return;
+    }
+
+    // --- 战斗逻辑 ---
+    gameTime = Date.now() - gameStartTimestamp;
+    currentShotInterval = getShotInterval();
+    checkPowerUpStatus(); 
+
+    // 1. Boss/游戏时间状态更新
+    if (gameState === 'BossIntro') {
+        if (boss) boss.intro(); 
+    } else if (gameState === 'BossFight') {
+        if (boss) boss.update(currentTime);
+    }
+    
+    // 2. 玩家移动和射击
+    player.x = mouseX;
+    player.y = mouseY;
+    if (gameState !== 'BossIntro' && gameTime - lastShotTime > getShotInterval()) {
+        shoot();
+        lastShotTime = gameTime;
+    }
+
+    // 3. Boss 子弹移动与碰撞玩家
+    bossBullets = bossBullets.filter(bullet => {
+        // 移动
+        bullet.x += Math.cos(bullet.angle) * bullet.speed; 
+        bullet.y += Math.sin(bullet.angle) * bullet.speed;
+        
+        // 碰撞玩家
+        const playerCollisionObj = { x: player.x, y: player.y, width: player.width * 0.8, height: player.height * 0.8 };
+        const bossBulletCollisionObj = { x: bullet.x, y: bullet.y, radius: bullet.radius };
+        if (checkCollision(bossBulletCollisionObj, playerCollisionObj)) {
+            if (!player.hasWingman) { 
+                player.health -= bullet.damage;
+                if (player.health <= 0) { gameOver = true; player.health = 0; player.hasWingman = false; saveUpgrades(); }
+            }
+            return false; 
+        }
+        // 边界检查
+        return bullet.y < GAME_HEIGHT + bullet.radius && bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
+    });
+    
+    // 4. 玩家子弹移动与碰撞 Boss
+    const bossCollisionObj = boss ? { x: boss.x, y: boss.y, width: boss.width, height: boss.height } : null;
+    bullets = bullets.filter(bullet => {
+        // 移动
+        if (bullet.isHoming && bullet.target) {
+            const angle = Math.atan2(bullet.target.y - bullet.y, bullet.target.x - bullet.x);
+            bullet.x += Math.cos(angle) * bullet.speed; 
+            bullet.y += Math.sin(angle) * bullet.speed;
+        } else if (bullet.angle !== undefined && bullet.angle !== 0) {
+            bullet.x += Math.sin(bullet.angle) * bullet.speed; 
+            bullet.y -= Math.cos(bullet.angle) * bullet.speed;
+        } else { 
+            bullet.y -= bullet.speed; 
+        }
+
+        // 碰撞 Boss
+        const bulletCollisionObj = { x: bullet.x, y: bullet.y, radius: bullet.radius };
+        if (boss && boss.isVulnerable && bossCollisionObj && checkCollision(bulletCollisionObj, bossCollisionObj)) {
+            score += 1; 
+            boss.health -= 1; // 玩家子弹伤害 Boss
+            return false; // 子弹消失
+        }
+        // 边界检查
+        return bullet.y > -bullet.radius && bullet.x > -bullet.radius && bullet.x < GAME_WIDTH + bullet.radius; 
+    });
+
+
+    // 5. 游戏胜利/失败判定
+    if (boss && boss.health <= 0) { 
+        gameOver = true; 
+        score += 5000; // 击败 Boss 奖励
+        saveUpgrades();
+    }
+    if (gameTime >= GAME_DURATION && !gameOver) { 
+        gameOver = true; 
+        if (boss) score += boss.health * 10; // 剩余血量转换成分数
+        saveUpgrades(); 
+    }
+    
+    // 6. 绘制
+    drawPlayer();
+    bullets.forEach(drawBullet);
+    bossBullets.forEach(drawBossBullet);
+    if (boss) drawBoss();
+    
+    drawText(); 
+    drawHealthBar(); 
+    drawItemButtons(); 
 
     requestAnimationFrame(update);
 }
 
 
-// --- 7. 游戏状态和重置 ---
+// --- 8. 游戏状态和输入控制 ---
 
 function resetGame() {
-    // V5.4 修正: 确保重置时 Boss 阶段也重置
     player.health = player.maxHealth;
     player.hasWingman = false;
     bullets = [];
-    enemies = [];
-    enemyBullets = [];
     boss = null;
     bossBullets = [];
     gameOver = false;
@@ -715,10 +670,9 @@ function resetGame() {
     gameStartTimestamp = Date.now(); 
     mouseX = GAME_WIDTH / 2;
     mouseY = GAME_HEIGHT - 100;
+    powerUp = { type: 'Normal', duration: 0, endTime: 0 };
+    player.speed = player.baseSpeed;
 }
-
-
-// --- 8. 输入控制和状态切换 ---
 
 function handleInput(e) {
     if (e.touches && e.touches.length > 0) {
@@ -748,14 +702,11 @@ function handleMenuClick(e) {
 
     if (gameState === 'Menu') {
         const btnX = GAME_WIDTH / 2 - 150;
-        // 开始 Boss 挑战按钮
         if (checkClick(btnX, GAME_HEIGHT / 2 - 50, 300, 70)) {
             resetGame();
             startBossBattle(); 
             gameState = 'BossIntro'; 
-        }
-        // 升级装备按钮
-        else if (checkClick(btnX, GAME_HEIGHT / 2 + 50, 300, 70)) {
+        } else if (checkClick(btnX, GAME_HEIGHT / 2 + 50, 300, 70)) {
             gameState = 'Upgrade';
         }
     } else if (gameState === 'Upgrade') {
@@ -764,34 +715,24 @@ function handleMenuClick(e) {
         const btnH = 60;
         let y = 200; 
 
-        // 1. 射速升级按钮
-        if (checkClick(btnX, y + 30, btnW, btnH)) { 
-            const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
+        if (checkClick(btnX, y + 30, btnW, btnH)) { // 射速升级
             if (upgrades.bulletRateLevel < MAX_UPGRADE_LEVEL && score >= UPGRADE_COST) {
                 score -= UPGRADE_COST; upgrades.bulletRateLevel++; saveUpgrades();
             }
         }
-        
         y += 150; 
-
-        // 2. 子弹大小升级按钮
-        if (checkClick(btnX, y + 30, btnW, btnH)) { 
-            const MAX_UPGRADE_LEVEL = 20; const UPGRADE_COST = 1000;
+        if (checkClick(btnX, y + 30, btnW, btnH)) { // 子弹大小升级
             if (upgrades.bulletSizeLevel < MAX_UPGRADE_LEVEL && score >= UPGRADE_COST) {
                 score -= UPGRADE_COST; upgrades.bulletSizeLevel++; saveUpgrades();
             }
         }
-
         y += 150; 
-        
-        // 3. 道具商店入口按钮
-        if (checkClick(btnX, y + 30, btnW, btnH)) { 
+        if (checkClick(btnX, y + 30, btnW, btnH)) { // 道具商店
             gameState = 'Shop';
             return;
         }
 
-        // 4. 返回菜单按钮
-        if (checkClick(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50)) {
+        if (checkClick(GAME_WIDTH / 2 - 100, GAME_HEIGHT - 80, 200, 50)) { // 返回菜单
             gameState = 'Menu';
         }
     } else if (gameState === 'Shop') {
@@ -809,6 +750,7 @@ function handleMenuClick(e) {
     }
 }
 
+// 监听器
 canvas.addEventListener('mousemove', (e) => { 
     if (gameState !== 'Menu' && gameState !== 'Upgrade' && gameState !== 'Shop') handleInput(e); 
 }); 
